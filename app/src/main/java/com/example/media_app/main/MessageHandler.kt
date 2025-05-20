@@ -1,8 +1,15 @@
-package com.example.media_app
+package com.example.media_app.main
 
 
 import android.util.Log
+import com.example.media_app.People
+import com.example.media_app.ROLE
+import com.example.media_app.STATUS
+import com.example.media_app.api.PeoplePostCount
+import com.example.media_app.api.PeopleTable
+import com.example.media_app.api.PostTable
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingCommand
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import org.json.JSONObject
@@ -11,6 +18,7 @@ import org.json.JSONObject
 sealed class IncomingMessage {
     data class PostsMessage(val posts: List<PostTable>): IncomingMessage()
     data class PostMessage(val post: String): IncomingMessage()
+    data class EndMessage(val command: String): IncomingMessage()
     data class PeopleMessage(val people: People): IncomingMessage()
     data class PeoplesMessage(val peoples: List<PeopleTable>): IncomingMessage()
     data class Unknown(val raw: String): IncomingMessage()
@@ -26,7 +34,9 @@ class MessageHandler(
     suspend fun connect(serverIp: String, serverPort: Int): Boolean {
         return postRepository.connect(serverIp, serverPort)
     }
-
+    suspend fun dellAllPost(){
+        postRepository.dellAllPost()
+    }
     suspend fun send(message: String) {
         postRepository.sendMessage(message)
         Log.d("MyTag_handler","send message")
@@ -38,16 +48,40 @@ class MessageHandler(
     fun observeMessages(): Flow<IncomingMessage> {
         val postFlow = postRepository.responsesWEB.map {
             try {
+                val command = JSONObject(it).optString("Command")
                 if (it.contains("authorization")) {
                     Log.d("MyTag_handler", "get authorization")
                     IncomingMessage.Other(JSONObject(it))
                 }
-                else {
+                else if(command =="send people end" || command=="send post end")
+                {
+                    Log.d("MyTag_handler", "end command")
+                    IncomingMessage.EndMessage(command)
+                }
+                else if(command == "send post") {
                     Log.d("MyTag_handler", "get post")
                     postRepository.addPost(parsePost(JSONObject(it).getJSONObject("Post values")))
                      IncomingMessage.Unknown("new post to db")
                     //IncomingMessage.PostMessage(parsePost(JSONObject(it).getJSONObject("Post values")).toString())
                     //IncomingMessage.PostsMessage(it)
+                }
+                else if(command == "synchronization") {
+                    Log.d("MyTag_handler", "synchronization")
+                    postRepository.addPost(parsePost(JSONObject(it).getJSONObject("Post values")))
+                    IncomingMessage.Unknown("synchronization")
+                    //IncomingMessage.PostMessage(parsePost(JSONObject(it).getJSONObject("Post values")).toString())
+                    //IncomingMessage.PostsMessage(it)
+                }
+                else if(command == "delete post") {
+                    Log.d("MyTag_handler", "delete post answer")
+                    val id = JSONObject(it).optInt("id");
+                    postRepository.deletePost(id)
+                    IncomingMessage.Unknown("delete post")
+                    //IncomingMessage.PostMessage(parsePost(JSONObject(it).getJSONObject("Post values")).toString())
+                    //IncomingMessage.PostsMessage(it)
+                }
+                else {
+                    IncomingMessage.Unknown("unknow message $it")
                 }
             } catch (e: Exception) {
                 e.message?.let { it1 -> Log.d("MyTag_handler", it1) }
